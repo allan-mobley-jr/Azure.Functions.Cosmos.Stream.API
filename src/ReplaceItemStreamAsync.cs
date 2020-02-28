@@ -1,21 +1,21 @@
 // Copyright (c) 2020 Allan Mobley. All rights reserved.
 // Licensed under the MIT License. See License.txt in the project root for license information.
 
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
+using Azure.Cosmos;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
-using Microsoft.AspNetCore.Http;
 using Mobsites.Azure.Functions.Cosmos.Extension;
-using Azure.Cosmos;
 using System.Net;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 namespace Mobsites.Azure.Functions.Cosmos.Stream.API
 {
     public static class ReplaceItemStreamAsync
     {
         [FunctionName("ReplaceItemStreamAsync")]
-        public static async Task<IActionResult> Run(
+        public static async Task<HttpResponseMessage> Run(
             [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "cosmos/{database}/{container}/{partitionKey}/{id}")] HttpRequest req,
             [Cosmos(
                 databaseName: "{database}",
@@ -26,9 +26,24 @@ namespace Mobsites.Azure.Functions.Cosmos.Stream.API
         {
             var response = await cosmosContainer.ReplaceItemStreamAsync(req.Body, id, new PartitionKey(partitionKey));
 
-            return (HttpStatusCode)response.Status == HttpStatusCode.OK
-                ? new FileStreamResult(response.ContentStream, "application/json")
-                : (IActionResult)new StatusCodeResult(response.Status);
+            // Would be really nice if we could simply pass the Cosmos response directly back,
+            // but, alas, we must reconstruct a return response.
+            var result = new HttpResponseMessage();
+
+            // Pass Cosmos response headers back.
+            foreach (var headerName in response.Headers)
+            {
+                result.Headers.Add(headerName.Name, headerName.Value);
+            }
+
+            // Pass Cosmos status code back.
+            result.StatusCode = (HttpStatusCode)response.Status;
+
+            if (response.ContentStream != null)
+                // Pass stream directly to response object, without deserializing.
+                result.Content = new StreamContent(response.ContentStream);
+
+            return result;
         }
     }
 }
